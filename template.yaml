@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: |
+  wild-rydes-samified
+  SAM Template for wild-rydes-samified
+
+Parameters:
+  AmazonSESVerifiedSender:
+    Type: String
+    Description: The Amazon SES Verified Sender Email Address
+    AllowedPattern: ^[^@]+@[^@]+\.[^@]+$
+
+Globals:
+  Function:
+    Timeout: 6
+    MemorySize: 256
+    Tracing: Active
+    Runtime: nodejs20.x
+    Architectures:
+      - x86_64
+  Api:
+    TracingEnabled: true
+Resources:
+  WildRydesApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      Cors:
+        AllowHeaders: '''Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token'''
+        AllowMethods: '''DELETE,GET,HEAD,OPTIONS,PATCH,POST,PUT'''
+        AllowOrigin: '''*'''
+      Auth:
+        DefaultAuthorizer: WildRydesCognitoAuthorizer
+        Authorizers:
+          WildRydesCognitoAuthorizer:
+            UserPoolArn: !GetAtt WildRydesCognitoUserPool.Arn
+        AddDefaultAuthorizerToCorsPreflight: false
+  WildRydesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: packages/wild-rydes/
+      Handler: index.lambdaHandler
+      FunctionName: !Sub WildRydes-${AWS::StackName}
+      Environment:
+        Variables:
+          RIDES_TABLE: !Ref WildRydesSimpleTable
+      Policies:
+        - arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess
+      Events:
+        Ride:
+          Type: Api
+          Properties:
+            RestApiId: !Ref WildRydesApi
+            Path: /ride
+            Method: post
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: es2020
+        Sourcemap: true
+        EntryPoints:
+          - index.ts
+  ApplicationResourceGroup:
+    Type: AWS::ResourceGroups::Group
+    Properties:
+      Name: !Sub ApplicationInsights-SAM-${AWS::StackName}
+      ResourceQuery:
+        Type: CLOUDFORMATION_STACK_1_0
+  ApplicationInsightsMonitoring:
+    Type: AWS::ApplicationInsights::Application
+    Properties:
+      ResourceGroupName: !Sub ApplicationInsights-SAM-${AWS::StackName}
+      AutoConfigurationEnabled: true
+    DependsOn: ApplicationResourceGroup
+  WildRydesCognitoUserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub WildRydesUserPool-${AWS::StackName}
+      MfaConfiguration: 'OFF'
+      EmailConfiguration:
+        EmailSendingAccount: DEVELOPER
+        From: !Sub "WildRydes Support <${AmazonSESVerifiedSender}>"
+        SourceArn: !Sub arn:aws:ses:${AWS::Region}:${AWS::AccountId}:identity/${AmazonSESVerifiedSender}
+      AutoVerifiedAttributes:
+        - email
+  WildRydesUserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub WildRydesUserPoolClient-${AWS::StackName}
+      UserPoolId: !Ref WildRydesCognitoUserPool
+  WildRydesSimpleTable:
+    Type: AWS::Serverless::SimpleTable
+    Properties:
+      PrimaryKey:
+        Name: RideId
+        Type: String
+      TableName: !Sub Rides-${AWS::StackName}
+Outputs:
+  WildRydesApi:
+    Description: API Gateway endpoint URL for prod stage for WildRydesFunction
+    Value: !Sub https://${WildRydesApi}.execute-api.${AWS::Region}.amazonaws.com/${WildRydesApi.Stage}/
+  WildRydesFunction:
+    Description: WildRydesFunction lambda ARN
+    Value: !GetAtt WildRydesFunction.Arn
+  WildRydesFunctionIamRole:
+    Description: Implicit IAM Role created for WildRydesFunction
+    Value: !GetAtt WildRydesFunctionRole.Arn
+  UserPoolId:
+    Description: Id for WildRydesCognitoUserPool
+    Value: !Ref WildRydesCognitoUserPool
+  AppClientId:
+    Description: ClientId for WildRydesUserPoolClient
+    Value: !Ref WildRydesUserPoolClient

@@ -1,0 +1,1 @@
+// process.env.DYNAMO_TABLE = "Rides";
